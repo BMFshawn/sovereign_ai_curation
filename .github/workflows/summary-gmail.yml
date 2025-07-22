@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install openai requests
 
-      - name: Generate summary
+      - name: Generate summary and date_range
         id: summary
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -34,13 +34,13 @@ jobs:
           from datetime import datetime, timedelta, timezone
           from openai import OpenAI
 
-          # UTC now → KST
+          # 1) 날짜 계산 (UTC→KST)
           now_utc = datetime.now(timezone.utc)
           today_kst = now_utc + timedelta(hours=9)
           week_ago_kst = today_kst - timedelta(days=7)
           date_range = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
 
-          # OpenAI v1.x client
+          # 2) OpenAI client 초기화 (v1.x)
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
           system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
@@ -59,12 +59,21 @@ jobs:
             temperature=0.3,
           )
           print(resp.choices[0].message.content)
+          # echo date_range for later use
+          print(date_range)
           EOF
 
-          # 새 출력 방식으로 body 세팅
+          # GITHUB_OUTPUT에 멀티라인 body, 단일라인 date_range 등록
           echo "body<<EOF" >> $GITHUB_OUTPUT
           cat summary.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+          # 마지막 줄(summary.txt 다음 줄)에 date_range가 있으므로, 추출해서 출력
+          tail -n1 summary.txt | sed -n '$p'  # (if summary.txt only contains summary, adjust accordingly)
+
+          # Alternatively, capture date_range directly if printed last by Python:
+          # date_range=$(tail -n1 summary.txt)
+          # echo "date_range=$date_range" >> $GITHUB_OUTPUT
 
       - name: Send email via SMTP
         uses: dawidd6/action-send-mail@v3
@@ -73,10 +82,10 @@ jobs:
           server_port:    587
           username:       ${{ secrets.SMTP_USERNAME }}
           password:       ${{ secrets.SMTP_PASSWORD }}
-          subject:        "【전주 소버린 AI 코멘트 정리】 ({{ steps.summary.outputs.date_range }})"
+          subject:        "【전주 소버린 AI 코멘트 정리】 (${{ steps.summary.outputs.date_range }})"
           body:           ${{ steps.summary.outputs.body }}
           to:             ${{ secrets.EMAIL_TO }}
           from:           ${{ secrets.EMAIL_FROM }}
 
       - name: Notify completion
-        run: echo "✅ Email sent successfully!"
+        run: echo "✅ Email sent: ${{ steps.summary.outputs.date_range }}"

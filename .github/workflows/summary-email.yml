@@ -1,0 +1,67 @@
+name: Weekly Sovereign AI Email Summary
+
+# 매주 금요일 오전 9시 KST → 00:00 UTC
+on:
+  schedule:
+    - cron: '0 0 * * FRI'
+  workflow_dispatch:
+
+jobs:
+  email_summary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai
+
+      - name: Generate summary
+        id: summary
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - << 'EOF'
+          import os, openai
+          from datetime import datetime, timedelta
+
+          # 날짜 범위 (KST)
+          today = datetime.utcnow() + timedelta(hours=9)
+          week_ago = today - timedelta(days=7)
+          dr = f"{week_ago:%Y-%m-%d} to {today:%Y-%m-%d}"
+
+          openai.api_key = os.environ["OPENAI_API_KEY"]
+          system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
+          user = (
+            f"Summarize comments on sovereign AI by Minister Baek Gyeonghun "
+            f"and AI Future Planning Chief Ha Jungwoo from {dr}, "
+            "collecting from Facebook, Instagram, X, and YouTube."
+          )
+          resp = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[{"role":"system","content":system},
+                      {"role":"user","content":user}],
+            temperature=0.3,
+          )
+          # 워크플로우 출력 변수로 설정
+          print(f"::set-output name=body::{resp.choices[0].message.content}")
+          EOF
+
+      - name: Send email via SMTP
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port:    ${{ secrets.SMTP_PORT }}
+          username:       ${{ secrets.SMTP_USERNAME }}
+          password:       ${{ secrets.SMTP_PASSWORD }}
+          subject:        "전주 소버린 AI 코멘트 정리"
+          body:           ${{ steps.summary.outputs.body }}
+          to:             ${{ secrets.EMAIL_TO }}
+          from:           ${{ secrets.EMAIL_FROM }}

@@ -29,19 +29,18 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # 1) Python으로 요약 생성
           python - << 'EOF' > summary.txt
           import os
           from datetime import datetime, timedelta, timezone
           from openai import OpenAI
 
-          # UTC now → KST 변환
+          # UTC now → KST
           now_utc = datetime.now(timezone.utc)
           today_kst = now_utc + timedelta(hours=9)
           week_ago_kst = today_kst - timedelta(days=7)
           date_range = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
 
-          # OpenAI client 초기화 (v1.x 인터페이스)
+          # OpenAI v1.x client
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
           system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
@@ -59,11 +58,10 @@ jobs:
             ],
             temperature=0.3,
           )
-          # 요약문 출력
           print(resp.choices[0].message.content)
           EOF
 
-          # 2) GITHUB_OUTPUT에 멀티라인 출력값 등록
+          # 새 출력 방식으로 body 세팅
           echo "body<<EOF" >> $GITHUB_OUTPUT
           cat summary.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -73,4 +71,12 @@ jobs:
         with:
           server_address: smtp.gmail.com
           server_port:    587
-          u
+          username:       ${{ secrets.SMTP_USERNAME }}
+          password:       ${{ secrets.SMTP_PASSWORD }}
+          subject:        "【전주 소버린 AI 코멘트 정리】 ({{ steps.summary.outputs.date_range }})"
+          body:           ${{ steps.summary.outputs.body }}
+          to:             ${{ secrets.EMAIL_TO }}
+          from:           ${{ secrets.EMAIL_FROM }}
+
+      - name: Notify completion
+        run: echo "✅ Email sent successfully!"

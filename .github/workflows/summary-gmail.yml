@@ -1,0 +1,77 @@
+name: Weekly Sovereign AI Email Summary
+
+# KST 매주 금요일 09:00 → UTC 매주 금요일 00:00
+on:
+  schedule:
+    - cron: '0 0 * * FRI'
+  workflow_dispatch:
+
+jobs:
+  email_summary:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai
+
+      - name: Generate summary
+        id: summary
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python - << 'EOF'
+          import os
+          from datetime import datetime, timedelta, timezone
+          from openai import OpenAI
+
+          # 날짜 계산 (UTC→KST)
+          now_utc = datetime.now(timezone.utc)
+          today_kst = now_utc + timedelta(hours=9)
+          week_ago_kst = today_kst - timedelta(days=7)
+          dr = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
+
+          # OpenAI client 초기화
+          client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
+          system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
+          user = (
+            f"Summarize comments on sovereign AI by Minister Baek Gyeonghun "
+            f"and AI Future Planning Chief Ha Jungwoo from {dr}, "
+            "collecting from Facebook, Instagram, X, and YouTube."
+          )
+
+          resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+              {"role": "system", "content": system},
+              {"role": "user",   "content": user}
+            ],
+            temperature=0.3,
+          )
+          summary = resp.choices[0].message.content
+
+          # 워크플로우 출력 변수로 설정
+          print(f"::set-output name=body::{summary}")
+          EOF
+
+      - name: Send email via SMTP
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port:    587
+          username:       ${{ secrets.SMTP_USERNAME }}
+          password:       ${{ secrets.SMTP_PASSWORD }}
+          subject:        "전주 소버린 AI 코멘트 정리 (${{ steps.summary.outputs.body && '' }})"
+          body:           ${{ steps.summary.outputs.body }}
+          to:             ${{ secrets.EMAIL_TO }}
+          from:           ${{ secrets.EMAIL_FROM }}

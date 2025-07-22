@@ -1,16 +1,17 @@
-name: Weekly Sovereign AI Email Summary
+name: Weekly Sovereign AI Summary
 
-# 매주 금요일 오전 9시 KST → 00:00 UTC
+# KST 매주 금요일 9:00 → UTC 매주 금요일 00:00
 on:
   schedule:
     - cron: '0 0 * * FRI'
   workflow_dispatch:
 
 jobs:
-  email_summary:
+  summarize:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -21,47 +22,58 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install openai
+          pip install openai requests
 
-      - name: Generate summary
-        id: summary
+      - name: Generate and post summary to Teams
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
         run: |
           python - << 'EOF'
-          import os, openai
-          from datetime import datetime, timedelta
+          import os
+          from datetime import datetime, timedelta, timezone
+          import requests
+          from openai import OpenAI
 
-          # 날짜 범위 (KST)
-          today = datetime.utcnow() + timedelta(hours=9)
-          week_ago = today - timedelta(days=7)
-          dr = f"{week_ago:%Y-%m-%d} to {today:%Y-%m-%d}"
+          # 1. 날짜 범위 계산 (KST 기준)
+          now_utc = datetime.now(timezone.utc)
+          today_kst = now_utc + timedelta(hours=9)
+          week_ago_kst = today_kst - timedelta(days=7)
+          dr = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
 
-          openai.api_key = os.environ["OPENAI_API_KEY"]
+          # 2. OpenAI client 초기화 (v1.x 방식)
+          client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+
           system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
           user = (
             f"Summarize comments on sovereign AI by Minister Baek Gyeonghun "
             f"and AI Future Planning Chief Ha Jungwoo from {dr}, "
             "collecting from Facebook, Instagram, X, and YouTube."
           )
-          resp = openai.ChatCompletion.create(
+
+          resp = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role":"system","content":system},
-                      {"role":"user","content":user}],
+            messages=[
+              {"role": "system", "content": system},
+              {"role": "user",   "content": user}
+            ],
             temperature=0.3,
           )
-          # 워크플로우 출력 변수로 설정
-          print(f"::set-output name=body::{resp.choices[0].message.content}")
+          summary = resp.choices[0].message.content
+
+          # 3. Teams Webhook으로 전송
+          payload = {
+            "@type": "MessageCard",
+            "@context": "https://schema.org/extensions",
+            "summary": "전주 소버린 AI 코멘트 정리",
+            "themeColor": "0078D7",
+            "title": f"전주 소버린 AI 코멘트 정리 ({dr})",
+            "sections": [{"text": summary}]
+          }
+          r = requests.post(os.environ["TEAMS_WEBHOOK_URL"], json=payload)
+          r.raise_for_status()
+          print("✅ Sent to Teams")
           EOF
 
-      - name: Send email via SMTP
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: ${{ secrets.SMTP_HOST }}
-          server_port:    ${{ secrets.SMTP_PORT }}
-          username:       ${{ secrets.SMTP_USERNAME }}
-          password:       ${{ secrets.SMTP_PASSWORD }}
-          subject:        "전주 소버린 AI 코멘트 정리"
-          body:           ${{ steps.summary.outputs.body }}
-          to:             ${{ secrets.EMAIL_TO }}
-          from:           ${{ secrets.EMAIL_FROM }}
+      - name: Notify success
+        run: echo "🏁 Weekly summary completed and sent!"

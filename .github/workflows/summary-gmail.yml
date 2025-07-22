@@ -29,18 +29,19 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          python - << 'EOF'
+          # OpenAI 요약 결과를 summary.txt에 저장
+          python - << 'EOF' > summary.txt
           import os
           from datetime import datetime, timedelta, timezone
           from openai import OpenAI
 
-          # 날짜 계산 (UTC→KST)
+          # 1) 날짜 계산 (UTC → KST)
           now_utc = datetime.now(timezone.utc)
           today_kst = now_utc + timedelta(hours=9)
           week_ago_kst = today_kst - timedelta(days=7)
           dr = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
 
-          # OpenAI client 초기화
+          # 2) OpenAI client 초기화 (v1.x)
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
           system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
@@ -58,11 +59,13 @@ jobs:
             ],
             temperature=0.3,
           )
-          summary = resp.choices[0].message.content
-
-          # 워크플로우 출력 변수로 설정
-          print(f"::set-output name=body::{summary}")
+          print(resp.choices[0].message.content)
           EOF
+
+          # 3) GITHUB_OUTPUT 파일에 body 출력값 쓰기 (새로운 방법)
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat summary.txt >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Send email via SMTP
         uses: dawidd6/action-send-mail@v3
@@ -71,7 +74,8 @@ jobs:
           server_port:    587
           username:       ${{ secrets.SMTP_USERNAME }}
           password:       ${{ secrets.SMTP_PASSWORD }}
-          subject:        "전주 소버린 AI 코멘트 정리 (${{ steps.summary.outputs.body && '' }})"
+          subject:        "전주 소버린 AI 코멘트 정리"
           body:           ${{ steps.summary.outputs.body }}
           to:             ${{ secrets.EMAIL_TO }}
           from:           ${{ secrets.EMAIL_FROM }}
+

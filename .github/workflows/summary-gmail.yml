@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v3
 
       - name: Set up Python
@@ -22,32 +22,32 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install openai
+          pip install openai requests
 
       - name: Generate summary
         id: summary
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          # OpenAI 요약 결과를 summary.txt에 저장
+          # 1) Python으로 요약 생성
           python - << 'EOF' > summary.txt
           import os
           from datetime import datetime, timedelta, timezone
           from openai import OpenAI
 
-          # 1) 날짜 계산 (UTC → KST)
+          # UTC now → KST 변환
           now_utc = datetime.now(timezone.utc)
           today_kst = now_utc + timedelta(hours=9)
           week_ago_kst = today_kst - timedelta(days=7)
-          dr = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
+          date_range = f"{week_ago_kst:%Y-%m-%d} to {today_kst:%Y-%m-%d}"
 
-          # 2) OpenAI client 초기화 (v1.x)
+          # OpenAI client 초기화 (v1.x 인터페이스)
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
           system = "You are a helpful assistant that summarizes sovereign AI comments by Korean officials."
           user = (
             f"Summarize comments on sovereign AI by Minister Baek Gyeonghun "
-            f"and AI Future Planning Chief Ha Jungwoo from {dr}, "
+            f"and AI Future Planning Chief Ha Jungwoo from {date_range}, "
             "collecting from Facebook, Instagram, X, and YouTube."
           )
 
@@ -59,10 +59,11 @@ jobs:
             ],
             temperature=0.3,
           )
+          # 요약문 출력
           print(resp.choices[0].message.content)
           EOF
 
-          # 3) GITHUB_OUTPUT 파일에 body 출력값 쓰기 (새로운 방법)
+          # 2) GITHUB_OUTPUT에 멀티라인 출력값 등록
           echo "body<<EOF" >> $GITHUB_OUTPUT
           cat summary.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -72,10 +73,4 @@ jobs:
         with:
           server_address: smtp.gmail.com
           server_port:    587
-          username:       ${{ secrets.SMTP_USERNAME }}
-          password:       ${{ secrets.SMTP_PASSWORD }}
-          subject:        "전주 소버린 AI 코멘트 정리"
-          body:           ${{ steps.summary.outputs.body }}
-          to:             ${{ secrets.EMAIL_TO }}
-          from:           ${{ secrets.EMAIL_FROM }}
-
+          u
